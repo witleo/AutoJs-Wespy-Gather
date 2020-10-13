@@ -1,4 +1,3 @@
-
 var WIDTH = device.width,
     HEIGHT = device.height,
     TYPE = device.brand + ' ' + device.model;
@@ -10,13 +9,15 @@ if (!requestScreenCapture()) {
     exit();
 }
 
-
-
 // 全局变量
 var 游戏次数 = 0
 var 脚本开启时间 = null
 // 游戏达成该次数后自动停止
 var 最大游戏次数 = 99999
+// 截图变量
+var img
+// 当前对局的队伍颜色 blue and red
+let teamColor = "";
 
 // 设置悬浮窗样式
 var window = floaty.window(
@@ -33,15 +34,16 @@ var window = floaty.window(
 window.exitOnClose();
 window.setPosition(device.width / 4, 80)
 
-var qizi = floaty.window(
+// 落点悬浮窗
+var landingPointFloaty = floaty.window(
     <frame h="70">
         {/* //bg="#00000000" */}
         <button id="action1" text="落点" bg="#00000000" />
         <img src="file://img/qizi.png" />
     </frame>
 );
-// qizi.setSize(100, 150)
-qizi.setPosition(-1000, -1000); //建立悬浮窗并隐藏
+// 设置悬浮窗坐标，使其隐藏
+landingPointFloaty.setPosition(-1000, -1000);
 
 
 var qizi_qidian = floaty.window(
@@ -119,11 +121,7 @@ window.action.setOnTouchListener(function (view, event) {
 });
 
 
-var CHESS_X, CHESS_Y;
-var TARGET_X, TARGET_Y;
-var img;
-// blue and red
-var teamColor = "";
+
 
 
 
@@ -144,6 +142,8 @@ function 停止按钮点击() {
         window.开关.setText('开始');
         toast("脚本停止");
         threads.shutDownAll()
+        // 脚本停止时颜色置为初始状态
+        teamColor = ""
         // 脚本开启时长 = new Date().getTime() - 脚本开启时间.getTime()
         // var minutes = Math.floor(脚本开启时长 / (60 * 1000))
         // var seconds = Math.round(脚本开启时长 % (60 * 1000) / 1000)
@@ -166,9 +166,8 @@ function 初始化(img2) {
         threshold: 4
     });
 
-    log("头像框坐标1", pointBlue)
-    log("头像框坐标2", pointRed)
-    // img2.recycle();
+    log("蓝色头像框坐标", pointBlue)
+    log("红色头像框坐标", pointRed)
     // 两个头像框都存在时,才说明游戏状态正常
     if (pointBlue && pointRed) {
         if (pointBlue.x < pointRed.x) {
@@ -194,7 +193,7 @@ function 开始游戏() {
             sleep(2000);
             img = captureScreen();
             // currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew" && 
-            if (currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew") {
+            if (currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew" || currentActivity() == "android.widget.RelativeLayout") {
                 if (teamColor != "") {
                     log("开始查找棋子")
                     // 限定查找棋子的范围，可以提高效率
@@ -218,8 +217,6 @@ function 开始游戏() {
                     //     })
                     // }
 
-
-
                     // 正在游戏，且轮到自己的回合时，准备跳
                     if (point) {
                         img.recycle();
@@ -230,117 +227,56 @@ function 开始游戏() {
                             region: [searchX, searchY],
                             threshold: 4
                         });
-                        var chessmanPoint = 找棋子中心点(point)
-                        var platformPoint = 找方块范围()
-
-                        if (chessmanPoint && platformPoint) {
-                            jumping(chessmanPoint,platformPoint)                        
-                        } else {
-                            log("未找到棋子或平台")
+                        // 找到棋子的中心点坐标
+                        var chessmanPoint = searchChessmanPoint(point)
+                        // 找到棋子后，开始找落点位置
+                        if (chessmanPoint) {
+                            var platformPoint = searchLandingPoint()
+                            if (platformPoint) {
+                                // 跳，从chessmanPoint跳到platformPoint
+                                jumping(chessmanPoint, platformPoint)
+                                // 跳跃完成后等待2秒
+                                sleep(2000);
+                            }
                         }
-
-
                     }
                 } else {
                     初始化(img)
                 }
-
             } else {
-                log("不在游戏房间内")
+                log("不在游戏房间内,当前位置：", currentActivity())
                 停止按钮点击()
             }
         }
     })
 }
 
-function jumping(chessmanPoint,platformPoint) {
-    // 本次跳跃距离
-    var distance = Math.abs(chessmanPoint.x - platformPoint.x) / WIDTH * 1650
-    // 触按位置
-    // var bx1 = parseInt(WIDTH / 2 + random(-10, 10)),
-    //     bx2 = parseInt(WIDTH / 2 + random(-10, 10)),
-    //     by1 = parseInt(HEIGHT * 0.785 + random(-4, 4)),
-    //     by2 = parseInt(HEIGHT * 0.785 + random(-4, 4));
-    // 跳！
+function jumping(chessmanPoint, platformPoint) {
+
+    // 计算按压时间
+    // 原方案，已经弃用
+    // 原有方案为先计算落点与棋子的X轴坐标差，来计算按压时间
+    // 此方案在内部测试时没问题，但是在实际匹配的对战中跳跃成功率会降低
+    // 是因为如果队手跳跃的落点距离平台中心点较远时，会导致棋子与下一个平台中心点之间的夹角产生变化
+    // 导致单靠X轴计算的时间不准确，这时需要根据Y轴的距离来进行调整
+    // var pressTime = Math.abs(chessmanPoint.x - platformPoint.x) / WIDTH * 1650
+
+    // 根据勾股定理计算跳跃距离
+    let distance = Math.sqrt(Math.pow(Math.abs(chessmanPoint.x - platformPoint.x), 2) + Math.pow(Math.abs(chessmanPoint.y - platformPoint.y), 2))
+    // 距离乘以系数，计算按压时间
+    let pressTime = distance * 1.37
+
     log("记录落点")
-    qizi.setPosition(platformPoint.x - 405, platformPoint.y - 232)
-    // 169, rwzb.y - 226
-    // swipe(CHESS_X, CHESS_Y, TARGET_X, TARGET_Y, Math.abs(CHESS_X - TARGET_X) / WIDTH * 1630);
-    swipe(chessmanPoint.x, chessmanPoint.y, chessmanPoint.x + 5, chessmanPoint.y + 5, distance);
-    qizi.setPosition(-1000, -1000)
+    landingPointFloaty.setPosition(platformPoint.x - 405, platformPoint.y - 232)
+    // 使用滑动作为按压命令可以防止检测 ps：虽然现在可能还没有检测
+    swipe(chessmanPoint.x + random(-10, 10), chessmanPoint.y + random(-10, 10), chessmanPoint.x + random(-10, 10), chessmanPoint.y + random(-10, 10), pressTime);
+    landingPointFloaty.setPosition(-1000, -1000)
     img.recycle();
-    // 停止按钮点击()
 }
 
-// function 找棋子范围() {
-//     threads.start(function () {
-//         // 限定查找棋子的范围，可以提高效率
-//         var searchX = parseInt(WIDTH * 0.1)
-//         var searchY = parseInt(HEIGHT * 0.5)
-//         var point
-//         // 在整个下半区寻找棋子的颜色
-//         // 优化为多点找色,结果更准确
-//         // #FC5948 红 #44B9FF 蓝 1650-1530
-//         // 判断本局颜色
-//         if (teamColor == "red") {
-//             point = images.findMultiColors(img, "#333238", [[0, -150, "#FC5948"]], {
-//                 region: [searchX, searchY],
-//                 threshold: 4
-//             });
-//         } else if (teamColor == "blue") {
-//             point = images.findMultiColors(img, "#333238", [[0, -150, "#44B9FF"]], {
-//                 region: [searchX, searchY],
-//                 threshold: 4
-//             })
-//         }
-//         // var pointRed = images.findMultiColors(img, "#333238", [[0, -150, "#FC5948"]], {
-//         //     region: [searchX, searchY],
-//         //     threshold: 4
-//         // });
-
-//         // if (pointRed) {
-//         //     point = pointRed
-//         // } else {
-//         //     var pointBlue = images.findMultiColors(img, "#333238", [[0, -150, "#44B9FF"]], {
-//         //         region: [searchX, searchY],
-//         //         threshold: 4
-//         //     })
-//         //     point = pointBlue
-//         // }
-//         // var point = findColor(img, "#333238", {
-//         //     region: [searchX, searchY],
-//         //     threshold: 4
-//         // });
-
-
-//         if (point) {
-//             // 找到棋子，开始寻找棋子的中心点
-//             // 设定棋子的高度为150，宽度100，得到新的搜索范围为[point.x-100,point.y-150,200,300]
-//             // [point.x - 100, point.y - 150, 200, 300],
-
-
-//             // canvas.drawRect(point.x - 100, point.y - 50, point.x + 100, point.y + 50, paint);
-
-//             // var image = canvas.toImage();
-//             // images.save(image, "/sdcard/tmp.png");
-
-//             // app.viewFile("/sdcard/tmp.png");
-//             log("棋子的点：", point)
-//             找棋子顶点(point)
-//         } else {
-//             // 未找到棋子，可能是游戏结束或棋子在搜索范围外
-//             // TODO 待处理
-//             // 保存失败的图片，后续优化
-//             images.save(img, "/sdcard/tmp" + random(0, 1000) + ".png");
-//             random(0, 1000)
-//             log("未找到棋子1")
-//             停止按钮点击()
-//         }
-
-//     })
-// }
-
-function 找棋子中心点(regionInfo) {
+// regionInfo为多点找色得出的棋子大概范围
+// 所以只需要在该点附近范围找中心点既可
+function searchChessmanPoint(regionInfo) {
     var CHESS_X = 0
     var CHESS_Y = 0
     var linemax = 0
@@ -352,9 +288,6 @@ function 找棋子中心点(regionInfo) {
             // 找到棋子的颜色
             if (colors.isSimilar("#333238", colors.toString(point), 4, "diff")) {
                 line.push(c);
-                // log("找到相似色")
-            } else {
-                // log("不是")
             }
         }
         if (line.length > linemax) {
@@ -362,12 +295,7 @@ function 找棋子中心点(regionInfo) {
             CHESS_X = line[Math.floor(line.length / 2)] + 2;
             CHESS_Y = r;
         }
-        // else if (line.length < linemax) {
-        //     break;
-        // }
-        // ;
     }
-    // qizi_qidian.setPosition(CHESS_X - 405, CHESS_Y - 232)
     log("棋子的中心点：", CHESS_X, CHESS_Y)
     if (CHESS_X != 0) {
         return { x: CHESS_X, y: CHESS_Y }
@@ -376,66 +304,69 @@ function 找棋子中心点(regionInfo) {
     }
 }
 
-function 找方块范围() {
-    for (let r = parseInt(HEIGHT * 0.4); r <= parseInt(HEIGHT * 0.9); r += 20) {
-        var flag = false;
+// 搜索棋子跳跃的落点坐标
+function searchLandingPoint() {
+    let pointX = null
+    let pointY = null
+    // 为了提高效率，先进行广域范围搜索确定平台顶点的范围
+    forr:
+    for (var r = parseInt(HEIGHT * 0.4); r <= parseInt(HEIGHT * 0.9); r += 20) {
         for (let c = parseInt(WIDTH * 0.1); c < parseInt(WIDTH * 0.9); c += 20) {
             var c0 = images.pixel(img, c, r);
             var c1 = images.pixel(img, c, r - 5);
             if (Math.abs(colors.red(c0) - colors.red(c1)) + Math.abs(colors.green(c0) - colors.green(c1)) + Math.abs(colors.blue(c0) - colors.blue(c1)) >= 30) {
                 pointX = c;
                 pointY = r;
-                flag = true;
-                break;
+                break forr;
             }
         }
-        if (flag) {
-            break;
-        }
     }
+
+    // 通过范围坐标找到相对精准的平台顶点坐标
     if (pointX && pointY) {
-        return 找方块顶点(pointX, pointY)
+        let topPoint = searchTopPoint(pointX, pointY)
+        if (topPoint) {
+            // 顶部坐标向下偏移60得到落点坐标(60是经过对战测试得出的数据)
+            // 这里没有取平台的中心点作为落点是因为：
+            // 1、不同于微信的跳一跳，在对战时不会因为落在中心点得到额外的加分，只要不跳离平台都一样
+            // 2、让落点靠近平台的前部边缘，可以防止对手“原地跳”，理论上来说偏移中心越远，对手跳跃难度越高
+            // 3、只计算平台顶点，比计算平台中心点速度要快，可以提高运行效率
+            // 4、我懒
+            topPoint.y += 60
+        }
+        return topPoint
     } else {
         return null
     }
 }
 
-function 找方块顶点(pointX, pointY) {
-    var TARGET_X = 0, TARGET_Y = 0
-    for1:
+// 搜索平台的顶点坐标
+// pointX, pointY 为广域范围搜索得到的“顶点附近”的坐标
+function searchTopPoint(pointX, pointY) {
     for (let r = (pointY - 40); r <= pointY; r += 1) {
         for (let c = (pointX - 20); c < ((pointX + 300) >= WIDTH ? WIDTH : (pointX + 300)); c += 1) {
             var c0 = images.pixel(img, c, r);
             var c1 = images.pixel(img, c, r - 1);
             if (Math.abs(colors.red(c0) - colors.red(c1)) + Math.abs(colors.green(c0) - colors.green(c1)) + Math.abs(colors.blue(c0) - colors.blue(c1)) >= 30) {
-
                 // 如果是较大的圆柱形，此点会向左侧偏移
                 // 找方块顶部中心点
-                // 优化，向右继续寻找，找到另一个颜色为止
+                // 优化，从右侧向左继续寻找，找到另一个颜色为止
+                // 计算两个坐标的中心点，作为顶点坐标
                 for (let a = c + 100; a > c; a--) {
                     var c2 = images.pixel(img, a, r);
                     var c3 = images.pixel(img, a, r - 1);
                     if (Math.abs(colors.red(c3) - colors.red(c2)) + Math.abs(colors.green(c3) - colors.green(c2)) + Math.abs(colors.blue(c3) - colors.blue(c2)) >= 30) {
                         // 偏移a/2个像素
                         log("偏移像素:", a - c)
-                        TARGET_X = parseInt((c + a) / 2);
-                        TARGET_Y = r;
-                        break for1;
+                        // TARGET_X = parseInt((c + a) / 2);
+                        // TARGET_Y = r;
+                        return { x: parseInt((c + a) / 2), y: r }
+                        // break for1;
                     }
                 }
             }
         }
     }
-    log("方块的顶点：", TARGET_X, TARGET_Y)
 
-    if (TARGET_X != 0) {
-        return { x: TARGET_X, y: TARGET_Y }
-    } else {
-        return null
-    }
-    // canvas.drawRect(CHESS_X, CHESS_Y, TARGET_X, TARGET_Y, paint);
-    // var image = canvas.toImage();
-    // images.save(image, "/sdcard/tmp.png");
-
-    // app.viewFile("/sdcard/tmp.png");
+    return null
 }
