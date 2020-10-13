@@ -16,6 +16,7 @@ var 脚本开启时间 = null
 var 最大游戏次数 = 99999
 // 截图变量
 var img
+var initImg
 // 当前对局的队伍颜色 blue and red
 let teamColor = "";
 
@@ -46,14 +47,14 @@ var landingPointFloaty = floaty.window(
 landingPointFloaty.setPosition(-1000, -1000);
 
 
-var qizi_qidian = floaty.window(
+var startingPointFloaty = floaty.window(
     <frame h="70">
         <button id="action2" text="起点" bg="#00000000" />
         <img src="file://img/qizi.png" />
     </frame>
 );
-// qizi_qidian.setSize(100, 150)
-qizi_qidian.setPosition(-1000, -1000); //建立悬浮窗并隐藏
+// 设置悬浮窗坐标，使其隐藏
+startingPointFloaty.setPosition(-1000, -1000);
 
 // 防止悬浮窗自动关闭，创建周期函数，每秒执行一次
 setInterval(() => { }, 1000)
@@ -120,11 +121,6 @@ window.action.setOnTouchListener(function (view, event) {
     return true;
 });
 
-
-
-
-
-
 function 开始按钮点击() {
     ui.run(function () {
         // 点击开始后按钮置为停止
@@ -151,8 +147,7 @@ function 停止按钮点击() {
     })
 }
 
-function 初始化(img2) {
-    // var img2 = captureScreen();
+function getTeamColor(img2) {
     // 判断本局棋子颜色
     // 头像框蓝#44B9FF
     // 头像框红#DF0b46
@@ -169,29 +164,28 @@ function 初始化(img2) {
     log("蓝色头像框坐标", pointBlue)
     log("红色头像框坐标", pointRed)
     // 两个头像框都存在时,才说明游戏状态正常
+    // 左面的头像框为我方颜色
     if (pointBlue && pointRed) {
         if (pointBlue.x < pointRed.x) {
             // 本局为蓝色方
-            teamColor = "blue";
+            teamColor = "#44B9FF";
             log("本局为蓝色方")
         } else {
             // 本局为红色方
-            teamColor = "red";
+            teamColor = "#FC5948";
             log("本局为红色方")
         }
     } else {
         // 初始化失败
         log("未找到本局队伍颜色")
-        停止按钮点击()
     }
-    img2.recycle();
 }
 
 function 开始游戏() {
     threads.start(function () {
         while (true) {
             sleep(2000);
-            img = captureScreen();
+            initImg = captureScreen();
             // currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew" && 
             if (currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew" || currentActivity() == "android.widget.RelativeLayout") {
                 if (teamColor != "") {
@@ -199,31 +193,22 @@ function 开始游戏() {
                     // 限定查找棋子的范围，可以提高效率
                     var searchX = parseInt(WIDTH * 0.1)
                     var searchY = parseInt(HEIGHT * 0.5)
-                    var point
-                    // 在整个下半区寻找棋子的颜色
-                    // 优化为多点找色,结果更准确
                     // #FC5948 红 #44B9FF 蓝 1650-1530
                     // 判断本局颜色
-                    var colorCode = teamColor == "red" ? "#FC5948" : "#44B9FF"
-                    // if (teamColor == "red") {
-                    point = images.findMultiColors(img, "#333238", [[0, -150, colorCode]], {
+                    // var colorCode = teamColor == "red" ? "#FC5948" : "#44B9FF"
+
+                    // 在整个下半区寻找棋子的颜色
+                    // 优化为多点找色,结果更准确
+                    var point = images.findMultiColors(initImg, "#333238", [[0, -150, teamColor]], {
                         region: [searchX, searchY],
                         threshold: 4
                     });
-                    // } else if (teamColor == "blue") {
-                    //     point = images.findMultiColors(img, "#333238", [[0, -150, colorCode]], {
-                    //         region: [searchX, searchY],
-                    //         threshold: 4
-                    //     })
-                    // }
-
                     // 正在游戏，且轮到自己的回合时，准备跳
                     if (point) {
-                        img.recycle();
-                        // 因为截图时可能存在动画，延迟1秒后重新截图
+                        // 因为随机截图时可能存在动画等干扰，延迟1秒后重新截图计算
                         sleep(1000);
                         img = captureScreen();
-                        point = images.findMultiColors(img, "#333238", [[0, -150, colorCode]], {
+                        point = images.findMultiColors(img, "#333238", [[0, -150, teamColor]], {
                             region: [searchX, searchY],
                             threshold: 4
                         });
@@ -239,14 +224,18 @@ function 开始游戏() {
                                 sleep(2000);
                             }
                         }
+                        // 图片回收
+                        img.recycle();
                     }
                 } else {
-                    初始化(img)
+                    getTeamColor(initImg)
                 }
             } else {
                 log("不在游戏房间内,当前位置：", currentActivity())
                 停止按钮点击()
             }
+            // 图片回收
+            initImg.recycle()
         }
     })
 }
@@ -271,7 +260,6 @@ function jumping(chessmanPoint, platformPoint) {
     // 使用滑动作为按压命令可以防止检测 ps：虽然现在可能还没有检测
     swipe(chessmanPoint.x + random(-10, 10), chessmanPoint.y + random(-10, 10), chessmanPoint.x + random(-10, 10), chessmanPoint.y + random(-10, 10), pressTime);
     landingPointFloaty.setPosition(-1000, -1000)
-    img.recycle();
 }
 
 // regionInfo为多点找色得出的棋子大概范围
