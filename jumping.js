@@ -3,11 +3,6 @@ var WIDTH = device.width,
     TYPE = device.brand + ' ' + device.model;
 log('设备信息：', TYPE, '\n分辨率：', WIDTH, '*', HEIGHT);
 
-// 获取截图权限
-if (!requestScreenCapture()) {
-    toast('请求截图失败，程序结束');
-    exit();
-}
 
 // 全局变量
 var 游戏次数 = 0
@@ -17,8 +12,19 @@ var 最大游戏次数 = 99999
 // 截图变量
 var img
 var initImg
-// 当前对局的队伍颜色 blue and red
+// 当前对局的队伍颜色
 let teamColor = "";
+// 是否绘制位置结果
+let isDraw = true
+// 设置自动匹配的游戏等级，初级为1，中级为2
+let matchLevel = 2
+
+
+// 获取截图权限
+if (!requestScreenCapture()) {
+    toast('请求截图失败，程序结束');
+    exit();
+}
 
 // 设置悬浮窗样式
 var window = floaty.window(
@@ -129,7 +135,11 @@ function 开始按钮点击() {
         // 启动前先停止其他脚本
         threads.shutDownAll()
         log("开始游戏")
-        开始游戏()
+        // 自动匹配，可以循环开始游戏
+        autoMatch()
+        // 游戏主线程
+        log("启动")
+        startGame()
     })
 }
 
@@ -151,7 +161,7 @@ function getTeamColor(img2) {
     // 判断本局棋子颜色
     // 头像框蓝#44B9FF
     // 头像框红#DF0b46
-
+    teamColor = ""
     var pointBlue = findColor(img2, "#44B9FF", {
         region: [0, 0, WIDTH, parseInt(HEIGHT * 0.2)],
         threshold: 4
@@ -181,59 +191,198 @@ function getTeamColor(img2) {
     }
 }
 
-function 开始游戏() {
+
+function autoMatch() {
+    log("自动匹配")
+    intoRoom()
+    intoGame()
+    // 进入游戏
+    function intoGame() {
+        threads.start(function () {
+            while (true) {
+                sleep(2000)
+                // 房间内
+                if (id("ice_ball_main_title").exists()) {
+                    if (id("ice_ball_main_title").findOne().text() == "跳跳跳") {
+                        // 获得图片控件的位置，如果位置在中间，则是初级场，不在中间为中级场
+                        let range = id("ice_ball_main_type_item_iv").findOne().bounds()
+                        // 判断当前房间等级是否与设置相同
+                        if (range.left < device.width / 2 && range.right > device.width / 2 && matchLevel == 2) {
+                            // 左滑进入中级场
+                            swipe(device.width * 0.8, device.height * 0.5, device.width * 0.2, device.height * 0.5, 300)
+                            // 滑动后需要等待一会，跟设备配置有关
+                            sleep(500)
+                        } else if (range.right < device.width / 2 && matchLevel == 1) {
+                            // 右滑进入初级场
+                            swipe(device.width * 0.2, device.height * 0.5, device.width * 0.8, device.height * 0.5, 300)
+                            // 滑动后需要等待一会，跟设备配置有关
+                            sleep(500)
+                        }
+
+                        if (id("ice_ball_quick_start").exists()) {
+                            id("ice_ball_quick_start").findOne().click()
+                        }
+                    }
+                }
+            }
+        })
+    }
+    // 进入游戏房间
+    function intoRoom() {
+        threads.start(function () {
+            while (true) {
+                sleep(2000)
+                // 首页
+                if (text("首页").exists()) {
+                    log("首页存在")
+                    id("home_game_recycler_view").findOne().children().forEach(child => {
+                        var target = child.findOne(id("more_game_view"));
+                        if (target) {
+                            target.click();
+                        }
+                    });
+                }
+
+                // 游戏列表
+                if (text("一起玩").exists()) {
+                    log("一起玩存在")
+                    swipe(device.width / 2, device.height * 0.9, device.width / 2, device.height * 0.2, 300)
+                    sleep(200)
+                    swipe(device.width / 2, device.height * 0.9, device.width / 2, device.height * 0.2, 300)
+                    sleep(200)
+                    id("home_game_recycler_view").findOne().children().forEach(function (value, index, array) {
+                        var target = value.findOne(text("拼操作"));
+                        if (target) {
+                            log(target)
+                            // id("img_iv").drawingOrder(3)
+                            log(target.parent())
+                            var num = parseInt(target.parent().drawingOrder()) + 1
+                            id("img_iv").drawingOrder(num).click()
+                        }
+                    });
+                }
+            }
+        })
+    }
+}
+
+function startGame() {
     threads.start(function () {
         while (true) {
-            sleep(2000);
+            sleep(2000)
             initImg = captureScreen();
-            // currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew" && 
-            if (currentActivity() == "com.wepie.wespy.cocosnew.CocosGameActivityNew" || currentActivity() == "android.widget.RelativeLayout") {
-                if (teamColor != "") {
-                    log("开始查找棋子")
-                    // 限定查找棋子的范围，可以提高效率
-                    var searchX = parseInt(WIDTH * 0.1)
-                    var searchY = parseInt(HEIGHT * 0.5)
-                    // #FC5948 红 #44B9FF 蓝 1650-1530
-                    // 判断本局颜色
-                    // var colorCode = teamColor == "red" ? "#FC5948" : "#44B9FF"
+            console.time("查找队伍颜色耗时")  //开始
+            getTeamColor(initImg)
+            console.timeEnd("查找队伍颜色耗时") //结束
+            log("当前应用包", currentPackage())
+            // if (currentPackage() == "com.wepie.weplay") {
+            if (teamColor != "") {
+                log("开始查找棋子")
+                // 限定查找棋子的范围，可以提高效率
+                var searchX = parseInt(WIDTH * 0.1)
+                var searchY = parseInt(HEIGHT * 0.5)
+                // #FC5948 红 #44B9FF 蓝 1650-1530
+                // 判断本局颜色
+                // var colorCode = teamColor == "red" ? "#FC5948" : "#44B9FF"
 
-                    // 在整个下半区寻找棋子的颜色
-                    // 优化为多点找色,结果更准确
-                    var point = images.findMultiColors(initImg, "#333238", [[0, -150, teamColor]], {
+                // 在整个下半区寻找棋子的颜色
+                // 优化为多点找色,结果更准确
+                var point = images.findMultiColors(initImg, "#333238", [[0, -150, teamColor]], {
+                    region: [searchX, searchY],
+                    threshold: 4
+                });
+                // 正在游戏，且轮到自己的回合时，准备跳
+                if (point) {
+                    // 因为随机截图时可能存在动画等干扰，延迟1秒后重新截图计算
+                    sleep(1000);
+                    console.time("总耗时")  //开始
+                    img = captureScreen();
+                    point = images.findMultiColors(img, "#333238", [[0, -150, teamColor]], {
                         region: [searchX, searchY],
                         threshold: 4
                     });
-                    // 正在游戏，且轮到自己的回合时，准备跳
-                    if (point) {
-                        // 因为随机截图时可能存在动画等干扰，延迟1秒后重新截图计算
-                        sleep(1000);
-                        img = captureScreen();
-                        point = images.findMultiColors(img, "#333238", [[0, -150, teamColor]], {
-                            region: [searchX, searchY],
-                            threshold: 4
-                        });
-                        // 找到棋子的中心点坐标
-                        var chessmanPoint = searchChessmanPoint(point)
-                        // 找到棋子后，开始找落点位置
-                        if (chessmanPoint) {
-                            var platformPoint = searchLandingPoint()
-                            if (platformPoint) {
-                                // 跳，从chessmanPoint跳到platformPoint
-                                jumping(chessmanPoint, platformPoint)
-                                // 跳跃完成后等待2秒
-                                sleep(2000);
+                    // 找到棋子的中心点坐标
+
+                    console.time("查找棋子耗时")
+                    var chessmanPoint = searchChessmanPoint(point)
+
+                    console.timeEnd("查找棋子耗时")
+                    // 找到棋子后，开始找落点位置
+                    if (chessmanPoint) {
+                        console.time("查找落点耗时")
+                        var platformPoint = searchLandingPoint()
+                        console.timeEnd("查找落点耗时")
+                        console.timeEnd("总耗时")
+                        if (platformPoint) {
+                            // 判断是否需要绘制找到的位置结果，调试时使用
+                            if (isDraw) {
+                                drawRange(chessmanPoint, platformPoint)
                             }
+                            // 跳，从chessmanPoint跳到platformPoint
+                            jumping(chessmanPoint, platformPoint)
+                            // 跳跃完成后等待2秒
+                            sleep(2000);
+                        } else {
+                            log("没找到平台")
                         }
-                        // 图片回收
-                        img.recycle();
+                    } else {
+                        log("没找到棋子")
                     }
-                } else {
-                    getTeamColor(initImg)
+                    // 图片回收
+                    img.recycle();
+
                 }
             } else {
-                log("不在游戏房间内,当前位置：", currentActivity())
-                停止按钮点击()
+                // 队伍颜色不存在时，判断是否需要点击返回
+                // 黑色
+                var color1 = "#374149"
+                // 蓝色
+                var color2 = "#82D5FF"
+                // 通过多点找色，找到返回按钮
+                var point = images.findMultiColors(initImg, color1, [
+                    [-20, 0, color2],
+                    [10, 0, color1],
+                    [20, 0, color1],
+                    [30, 0, color1],
+                    [50, 0, color2],
+
+                    [-20, 16, color2],
+                    [-10, 16, color2],
+                    [0, 16, color2],
+                    [10, 16, color2],
+                    [20, 16, color2],
+                    [30, 16, color2],
+                    [40, 16, color1],
+                    [50, 16, color2],
+                    [60, 16, color2],
+
+                    [-20, 33, color2],
+                    [-10, 33, color2],
+                    [0, 33, color1],
+                    [10, 33, color1],
+                    [20, 33, color1],
+                    [30, 33, color1],
+                    [50, 33, color2],
+                    [60, 33, color2]
+                ], {
+                    region: [device.width * 0.5, device.height * 0.5, device.width * 0.5, device.height * 0.4],
+                    threshold: 12
+                });
+                log("找色结果", point)
+                if (point) {
+                    log("点击返回，开始下一局")
+                    click(point.x, point.y)
+                }
             }
+            // else {
+            //     console.time("查找队伍颜色耗时")  //开始
+            //     getTeamColor(initImg)
+            //     console.timeEnd("查找队伍颜色耗时") //结束
+            // }
+            // } else {
+            //     log("不在游戏房间内,当前位置：", currentActivity())
+            //     // 停止按钮点击()
+            // }
             // 图片回收
             initImg.recycle()
         }
@@ -260,6 +409,37 @@ function jumping(chessmanPoint, platformPoint) {
     // 使用滑动作为按压命令可以防止检测 ps：虽然现在可能还没有检测
     swipe(chessmanPoint.x + random(-10, 10), chessmanPoint.y + random(-10, 10), chessmanPoint.x + random(-10, 10), chessmanPoint.y + random(-10, 10), pressTime);
     landingPointFloaty.setPosition(-1000, -1000)
+}
+
+
+var 绘制次数 = 0
+// 用来绘制起点和落点的范围，调试时使用
+function drawRange(chessmanPoint, platformPoint) {
+
+    绘制次数 += 1
+    // 画布
+    var canvas = new Canvas(img);
+    // 画笔
+    var paint = new Paint();
+    // 落点绘制
+    canvas.drawRect(platformPoint.x - 5,
+        platformPoint.y - 5,
+        platformPoint.x + 5,
+        platformPoint.y + 5,
+        paint);
+
+    paint.setColor(colors.RED);
+    // 起点绘制
+    canvas.drawRect(chessmanPoint.x - 5,
+        chessmanPoint.y - 5,
+        chessmanPoint.x + 5,
+        chessmanPoint.y + 5,
+        paint);
+    var drawImage = canvas.toImage();
+    images.save(drawImage, "/sdcard/jumping_draw_range" + 绘制次数 + ".png");
+    log("绘制次数：", 绘制次数)
+    // 回收图片
+    drawImage.recycle();
 }
 
 // regionInfo为多点找色得出的棋子大概范围
@@ -301,8 +481,8 @@ function searchLandingPoint() {
     for (var r = parseInt(HEIGHT * 0.4); r <= parseInt(HEIGHT * 0.9); r += 20) {
         for (let c = parseInt(WIDTH * 0.1); c < parseInt(WIDTH * 0.9); c += 20) {
             var c0 = images.pixel(img, c, r);
-            var c1 = images.pixel(img, c, r - 5);
-            if (Math.abs(colors.red(c0) - colors.red(c1)) + Math.abs(colors.green(c0) - colors.green(c1)) + Math.abs(colors.blue(c0) - colors.blue(c1)) >= 30) {
+            var c1 = images.pixel(img, c, r - 20);
+            if (Math.abs(colors.red(c0) - colors.red(c1)) + Math.abs(colors.green(c0) - colors.green(c1)) + Math.abs(colors.blue(c0) - colors.blue(c1)) >= 20) {
                 pointX = c;
                 pointY = r;
                 break forr;
@@ -319,7 +499,7 @@ function searchLandingPoint() {
             // 1、不同于微信的跳一跳，在对战时不会因为落在中心点得到额外的加分，只要不跳离平台都一样
             // 2、让落点靠近平台的前部边缘，可以防止对手“原地跳”，理论上来说偏移中心越远，对手跳跃难度越高
             // 3、只计算平台顶点，比计算平台中心点速度要快，可以提高运行效率
-            // 4、我懒
+            // 4、懒得写
             topPoint.y += 60
         }
         return topPoint
@@ -331,16 +511,17 @@ function searchLandingPoint() {
 // 搜索平台的顶点坐标
 // pointX, pointY 为广域范围搜索得到的“顶点附近”的坐标
 function searchTopPoint(pointX, pointY) {
+    log("开始查找平台顶点")
     for (let r = (pointY - 40); r <= pointY; r += 1) {
-        for (let c = (pointX - 20); c < ((pointX + 300) >= WIDTH ? WIDTH : (pointX + 300)); c += 1) {
+        for (let c = (pointX - 40); c < ((pointX + 200) > WIDTH ? WIDTH : (pointX + 200)); c += 1) {
             var c0 = images.pixel(img, c, r);
             var c1 = images.pixel(img, c, r - 1);
-            if (Math.abs(colors.red(c0) - colors.red(c1)) + Math.abs(colors.green(c0) - colors.green(c1)) + Math.abs(colors.blue(c0) - colors.blue(c1)) >= 30) {
+            if (Math.abs(colors.red(c0) - colors.red(c1)) + Math.abs(colors.green(c0) - colors.green(c1)) + Math.abs(colors.blue(c0) - colors.blue(c1)) >= 20) {
                 // 如果是较大的圆柱形，此点会向左侧偏移
                 // 找方块顶部中心点
                 // 优化，从右侧向左继续寻找，找到另一个颜色为止
                 // 计算两个坐标的中心点，作为顶点坐标
-                for (let a = c + 100; a > c; a--) {
+                for (let a = c + 100; a > c; a -= 1) {
                     var c2 = images.pixel(img, a, r);
                     var c3 = images.pixel(img, a, r - 1);
                     if (Math.abs(colors.red(c3) - colors.red(c2)) + Math.abs(colors.green(c3) - colors.green(c2)) + Math.abs(colors.blue(c3) - colors.blue(c2)) >= 30) {
@@ -348,6 +529,7 @@ function searchTopPoint(pointX, pointY) {
                         log("偏移像素:", a - c)
                         // TARGET_X = parseInt((c + a) / 2);
                         // TARGET_Y = r;
+                        log("顶点坐标", { x: parseInt((c + a) / 2), y: r })
                         return { x: parseInt((c + a) / 2), y: r }
                         // break for1;
                     }
@@ -355,6 +537,5 @@ function searchTopPoint(pointX, pointY) {
             }
         }
     }
-
     return null
 }
